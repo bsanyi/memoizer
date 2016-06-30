@@ -40,15 +40,45 @@ what to memoize and what not.
       defmemo fib(n), do: fib(n - 1) + fib(n - 2)
     end
 
-This turns the `MemoExample` module into an OTP worker that needs to be started before
-you can apply the functions in it.  `MemoExample.start_link` is the simplest way to do
-that, or you can use a supervisor to take care of it for you.
+You can use guards just like with normal functions.  It is even possible to
+control which part to memoize.  Here's a fib() variant that only memoizes
+every 5th value:
+
+    def     sparse_fib(0), do: 0
+
+    def     sparse_fib(1), do: 1
+
+    defmemo sparse_fib(n) when rem(n, 5) == 0,
+                    do: sparse_fib(n - 1) + sparse_fib(n - 2)
+
+    def     sparse_fib(n),
+                    do: sparse_fib(n - 1) + sparse_fib(n - 2)
+
+`use Memoizer` turns the `MemoExample` module into an OTP worker that needs
+to be started before you can apply the functions in it.
+`MemoExample.start_link` is the simplest way to do that, or you can use a
+supervisor to take care of it for you.
 
     children = [
       ...
       worker(MemoExample, []),
       ...
     ]
+
+If you need to normalize, typecast, map, etc. some of th paramters or the
+return value of a memoized function, just create a wrapper function for it.
+You can use `defmemop` if you want to hide the non-wrapped version of your
+function.
+
+    def age(birth) do
+      birth
+      |> Timex.parse!("{YYYY}-{0M}-{0D}")
+      |> _age
+    end
+
+    defmemop _age(birth) do
+      ...
+    end
 
 
 ## How it works
