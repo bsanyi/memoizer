@@ -58,7 +58,7 @@ defmodule Memoizer do
   While memoizing pure functions does not change the semantics of your program,
   nothings stops you applying the technique to non-pure functions.  This may
   make sense in certain situations.  In this case functions like
-  `Memoizer.forget`, `Memoizer.memoized?` and `Memoizer.remember` can come in
+  `Memoizer.forget`, `Memoizer.memoized?` and `Memoizer.learn` can come in
   handy. It is a deliberate decision that these functions are kept in the
   `Memoizer` module and are not injected into the modules that `use Memoizer`.
 
@@ -92,7 +92,7 @@ defmodule Memoizer do
         {:noreply, state}
       end
 
-      def handle_call({:remember, function_name, params, return_value}, _, state) do
+      def handle_call({:learn, function_name, params, return_value}, _, state) do
         __MODULE__ |> :ets.insert({{function_name, params}, return_value})
         {:reply, :ok, state}
       end
@@ -190,14 +190,14 @@ defmodule Memoizer do
   ## Example
 
       MyModule
-      |> Memoizer.remember(:funct, [1], "one")
-      |> Memoizer.remember(:funct, [2], "two")
+      |> Memoizer.learn(:funct, [1], "one")
+      |> Memoizer.learn(:funct, [2], "two")
       |> Memoizer.forget(:funct, [500])
       |> Memoizer.memoized?(:funct, [500]) # => false
   """
 
-  def remember(module, function, params, return_value) do
-    GenServer.call(module, {:remember, function, params, return_value})
+  def learn(module, function, params, return_value) do
+    GenServer.call(module, {:learn, function, params, return_value})
     module
   end
 
