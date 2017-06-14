@@ -1,7 +1,16 @@
 defmodule Memoizer do
   @moduledoc """
   Memoizer turns an ordinary Elixir module into a transparent service that
-  memoizes (aka caches) your function calls.
+  memoizes (aka caches) your function calls.  The first function call may
+  take a very long time:
+
+    iex> :tc.timer(Ultimate, :answer, [:life, :universe, :everything])
+    {7.5 million years in microseconds, 42}
+
+  but further calls happen almost instantaneously when the answer is already available:
+
+    iex> :tc.timer(Ultimate, :answer, [:life, :universe, :everything])
+    {0, 42}
 
   Here's a simple example how to us it.  Let's make the module below a memoized
   one:
@@ -21,10 +30,10 @@ defmodule Memoizer do
       end
 
   It is also important that `Memo` has to be started before you start
-  calculating values.  The simplest way is to call `Memo.start_link`, but you
-  should consider putting it under supervision.
+  calculating values.  The simplest way is to call `Memo.start_link` if you
+  are just playing around, but you should consider putting it under supervision.
 
-  When the service is running, you can make calls to the functions just as it
+  When the service is running, you can make calls to the functions just as they
   were defined in the first place: `Memo.fact(100)`.  This caches the return
   values of `fact/1` for params between 2 and 100.  Next time you call the
   function within this range, the stored value is returned.
@@ -34,9 +43,9 @@ defmodule Memoizer do
   controll over what makes it into the cache and what gets calculated over and
   over again with every function call.  For instance, it does not make much
   sense to memoize `fact(0)` in the example above, so we can keep this case in
-  compiled code. Here's an example of calculating the Fibonacci sequence with
-  only memoizing `fib(n)` when n or n-1 can be divided by 7.  This reduces the
-  memory footprint to 2/7 of the version memoizing every value:
+  a normal function clause. Here's an example of calculating the Fibonacci
+  sequence with only memoizing `fib(n)` when n or n-1 can be divided by 7.
+  This reduces the memory footprint to 2/7 of the version memoizing every value:
 
       def     fib(0),                     do: 0
       def     fib(1),                     do: 1
@@ -63,7 +72,7 @@ defmodule Memoizer do
   `Memoizer` module and are not injected into the modules that `use Memoizer`.
 
   If you are after more performance, `Memoizer.compile` can give you some more
-  speed by compiling the cached function clauses into a separate module.
+  speed by compiling the currently cached function clauses into a separate module.
   """
 
   defmacro __using__(_) do
@@ -78,7 +87,7 @@ defmodule Memoizer do
       end
 
       def init(_) do
-        IO.inspect self
+        IO.inspect self()
         __MODULE__ |> :ets.new([:ordered_set, :protected, :named_table, {:read_concurrency, true}])
         {:ok, nil}
       end
@@ -99,6 +108,16 @@ defmodule Memoizer do
 
       def handle_call({:forget, function_name, params}, _, state) do
         __MODULE__ |> :ets.delete({function_name, params})
+        {:reply, :ok, state}
+      end
+
+      def handle_call({:forget, function_name}, _, state) do
+        __MODULE__ |> :ets.match_delete({{:fib, :'$1'}, :'$2'})
+        {:reply, :ok, state}
+      end
+
+      def handle_call({:forget}, _, state) do
+        __MODULE__ |> :ets.delete_all_objects
         {:reply, :ok, state}
       end
 
@@ -217,6 +236,23 @@ defmodule Memoizer do
   end
 
   @doc """
+  `forget(module, function)` forces Memoizer to delete all cached cases of the
+  `function` in the `module`.
+  """
+  def forget(module, function) do
+    GenServer.call(module, {:forget, function})
+    module
+  end
+
+  @doc """
+  `forget(module)` deletes all cached data of all functions under the given `module`.
+  """
+  def forget(module) do
+    GenServer.call(module, {:forget})
+    module
+  end
+
+  @doc """
   Compiles the given Memoizer `module` into another module where the memoized
   function calls are defined as separate function caluses.
 
@@ -231,18 +267,20 @@ defmodule Memoizer do
       M.f 100  # =>  200
       M.f 1000 # => 1100
 
-      Memoizer.compile M, into: Test
+      Memoizer.compile M, into: CompileTest
 
-  This creates a module called `Test` as if it were defined as follows:
+  This creates a module called `CompileTest` as if it were defined as follows:
 
-      defmodule Test do
-        def f(100), do: 200
+      defmodule CompileTest do
+        def f(100),  do: 200
         def f(1000), do: 1100
       end
 
   Compilation is a very slow process, especially when there are a huge number
   of memoized cases.  However, the compiled version can be approximately 30%
-  faster than the simple, memoized function calls.
+  faster than the simple, memoized function calls.  You may take advantage of
+  the Erlang runtime allowing you to have two loaded versions of modules loaded
+  at the same time.
   """
 
   def compile(module, opts \\ []) do
@@ -259,7 +297,7 @@ defmodule Memoizer do
 
         | acc ]
       end, [], module),
-      [file: ""]
+      [file: opts[:file] || ""]
     )
   end
 end
